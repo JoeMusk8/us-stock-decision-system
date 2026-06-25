@@ -1,5 +1,6 @@
 import streamlit as st
 
+from core.sec_edgar_client import fetch_sec_company_snapshot, normalize_ticker
 from core.utils import render_clean_table, render_metric_card, render_page_header
 from core.workflow_overview import build_workflow_overview, build_workspace_counts, suggest_next_step
 from core.workspace_quality import build_quality_checks, build_quality_summary
@@ -17,6 +18,34 @@ def _render_metric_grid(counts):
     for column, (title, value, note) in zip(columns, metrics):
         with column:
             render_metric_card(title, value, note)
+
+
+def _render_sec_lookup():
+    if "sec_company_snapshots" not in st.session_state:
+        st.session_state.sec_company_snapshots = {}
+    st.markdown("### SEC 公司事实查询")
+    st.caption("读取 submissions / companyfacts，结果待人工确认。")
+    with st.form("sec_lookup_form"):
+        ticker = st.text_input("ticker", placeholder="例如 AAPL、MSFT、NVDA")
+        submitted = st.form_submit_button("读取公司事实", width="stretch")
+    if submitted:
+        normalized = normalize_ticker(ticker)
+        if normalized:
+            result = fetch_sec_company_snapshot(normalized)
+            if result.get("ok"):
+                st.session_state.sec_company_snapshots[normalized] = result["snapshot"]
+                st.success("已读取公司事实。")
+            else:
+                st.session_state.sec_company_snapshots[normalized] = {"ticker": normalized, "data_status": "数据不足", "error": result.get("error", "读取失败")}
+                st.caption("数据不足：" + str(result.get("error", "读取失败"))[:120])
+    snapshots = st.session_state.sec_company_snapshots
+    if not snapshots:
+        render_clean_table([{"ticker": "待输入", "CIK": "", "公司名称": "", "最近文件数": 0, "财务字段数": 0, "状态": "数据不足"}])
+        return
+    rows = []
+    for snapshot in snapshots.values():
+        rows.append({"ticker": snapshot.get("ticker", ""), "CIK": snapshot.get("cik", ""), "公司名称": snapshot.get("company_name", ""), "最近文件数": len(snapshot.get("recent_filings", []) or []), "财务字段数": len(snapshot.get("financial_facts", []) or []), "状态": snapshot.get("data_status", "待人工确认")})
+    render_clean_table(rows)
 
 
 def render():
@@ -52,3 +81,4 @@ def render():
 
     st.markdown("### 工作区质量检查")
     render_clean_table(build_quality_checks(st.session_state))
+    _render_sec_lookup()
