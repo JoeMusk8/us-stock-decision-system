@@ -1,0 +1,27 @@
+{
+  "version": "0.1",
+  "stage": "Phase 7E",
+  "description": "范式创新监控示例结构。当前不是选股建议，不是交易指令。",
+  "records": [
+    {
+      "theme_name": "EXAMPLE_THEME1",
+      "source_type": "人工输入",
+      "signal_type": "其他",
+      "signal_strength": "中",
+      "summary": "示例主题，不是真实推荐。",
+      "evidence_note": "示例结构，待人工确认。",
+      "data_status": "待人工确认",
+      "updated_at": ""
+    },
+    {
+      "theme_name": "EXAMPLE_THEME2",
+      "source_type": "人工输入",
+      "signal_type": "其他",
+      "signal_strength": "弱",
+      "summary": "示例主题，不是真实推荐。",
+      "evidence_note": "示例结构，待人工确认。",
+      "data_status": "待人工确认",
+      "updated_at": ""
+    }
+  ]
+}
