@@ -1,6 +1,21 @@
+import pandas as pd
 import streamlit as st
 
-from core.utils import render_demo_notice, render_section_title, render_status_badge, render_status_card
+from core.deep_research_model import (
+    SCORE_FIELDS,
+    build_research_summary,
+    calculate_total_research_score,
+    derive_research_decision,
+    derive_research_grade,
+    normalize_research_task,
+    validate_research_task,
+)
+from core.research_to_tracking_bridge import (
+    build_tracking_item_from_research_task,
+    can_transfer_to_tracking_pool,
+    upsert_tracking_item,
+)
+from core.utils import render_section_title, render_status_badge, render_status_card
 
 
 TABS = [
@@ -17,8 +32,19 @@ TABS = [
     "研究报告与等级",
 ]
 
-DATA_STATUS = "示例数据 / 待配置 / 数据不足"
+DATA_STATUS = "待人工确认 / 数据不足 / 已验证"
 AI_DRAFT = "AI草稿 / 待人工确认"
+
+SCORE_LABELS = {
+    "business_boundary_score": "公司业务边界验证",
+    "theme_benefit_score": "主题受益验证",
+    "supply_chain_position_score": "产业链位置验证",
+    "financial_realization_score": "财务兑现验证",
+    "customer_order_capex_score": "客户 / 订单 / CapEx 验证",
+    "competition_score": "竞争格局验证",
+    "risk_counterevidence_score": "风险与反证验证",
+    "claim_evidence_score": "Claim / Evidence 验证",
+}
 
 RESEARCH_QUESTIONS = [
     "公司主营业务是什么？",
@@ -31,83 +57,20 @@ RESEARCH_QUESTIONS = [
     "这家公司是否真的受益于这个主题？",
 ]
 
-BUSINESS_BOUNDARY_ITEMS = [
-    "公司主营业务",
-    "主要产品",
-    "收入分部",
-    "客户类型",
-    "主题相关业务是否核心业务",
-    "是否只是边缘业务",
-    "公司是否明确披露该方向",
-]
 
-THEME_BENEFIT_ITEMS = [
-    "业务相关性",
-    "收入暴露度",
-    "订单 / 客户证据",
-    "管理层是否确认该方向",
-    "产业链节点匹配度",
-    "是否只是概念相关",
-]
+def _init_tasks():
+    if "deep_research_tasks" not in st.session_state:
+        st.session_state.deep_research_tasks = []
 
-CHAIN_POSITION_ITEMS = [
-    "所属产业链层级",
-    "对应产业链节点",
-    "是否处于核心瓶颈节点",
-    "是否具备稀缺性",
-    "是否难以替代",
-    "是否具备议价能力",
-]
 
-FINANCIAL_REALIZATION_ITEMS = [
-    "收入增长",
-    "收入分部变化",
-    "毛利率变化",
-    "订单 / Backlog",
-    "管理层指引",
-    "现金流",
-]
+def _init_tracking_pool():
+    if "tracking_pool" not in st.session_state:
+        st.session_state.tracking_pool = []
 
-CUSTOMER_ORDER_CAPEX_ITEMS = [
-    "客户证据",
-    "订单证据",
-    "CapEx相关性",
-    "公司扩产",
-    "客户需求持续性",
-]
 
-COMPETITION_ITEMS = [
-    "主要竞争对手",
-    "技术壁垒",
-    "客户认证壁垒",
-    "规模优势",
-    "替代风险",
-    "价格竞争风险",
-]
-
-RISK_COUNTER_ITEMS = [
-    "主题相关业务可能不是核心业务",
-    "公司没有明确披露该方向",
-    "订单证据不足",
-    "竞争对手更强",
-]
-
-CLAIM_ITEMS = [
-    "公司主营业务包括____",
-    "公司业务与该主题相关",
-    "相关业务属于核心业务",
-    "公司明确披露该方向",
-]
-
-REPORT_SCORE_ITEMS = [
-    "公司业务边界清晰度",
-    "主题受益验证",
-    "产业链位置验证",
-    "财务兑现验证",
-    "客户/订单/CapEx证据",
-    "竞争格局",
-    "风险与反证",
-]
+def _tasks():
+    _init_tasks()
+    return st.session_state.deep_research_tasks
 
 
 def _table(rows):
@@ -122,424 +85,375 @@ def _button_row(labels, prefix):
             st.button(label, key=f"{prefix}_{index}", width="stretch")
 
 
-def _verification_rows(items, mode="evidence_status"):
-    rows = []
-    for index, item in enumerate(items, start=1):
-        row = {"验证项": item, "当前判断": "示例数据 / 待配置"}
-        if mode == "count":
-            row.update(
-                {
-                    "证据数量": "__",
-                    "evidence_id": f"EVID____-{index}",
-                    "状态": "数据不足",
-                }
-            )
+def _task_label(task):
+    return f"{task.get('ticker', '')} / {task.get('theme', '')}"
+
+
+def _task_rows(tasks):
+    return [
+        {
+            "ticker": task.get("ticker", ""),
+            "company_name": task.get("company_name", ""),
+            "theme": task.get("theme", ""),
+            "research_status": task.get("research_status", ""),
+            "final_research_grade": task.get("final_research_grade", ""),
+            "decision": task.get("decision", ""),
+            "data_status": task.get("data_status", "待人工确认"),
+            "updated_at": task.get("updated_at", ""),
+        }
+        for task in tasks
+    ]
+
+
+def _selected_task_ui(key_prefix):
+    tasks = _tasks()
+    if not tasks:
+        st.info("请先在“股票任务池总览”手动创建投研任务。")
+        return None, None
+    labels = [_task_label(task) for task in tasks]
+    selected_label = st.selectbox("选择投研任务", labels, key=f"{key_prefix}_selected_task")
+    selected_index = labels.index(selected_label)
+    return selected_index, tasks[selected_index]
+
+
+def _render_task_form():
+    with st.form("deep_research_add_task_form", clear_on_submit=True):
+        st.markdown("### 手动创建投研任务")
+        columns = st.columns(3)
+        with columns[0]:
+            ticker = st.text_input("ticker", placeholder="例如 LITE、COHR、MU")
+            company_name = st.text_input("company_name", placeholder="可为空")
+            theme = st.text_input("theme", placeholder="例如 AI 光互连、HBM、数据中心电力")
+        with columns[1]:
+            research_status = st.selectbox("research_status", ["未开始", "进行中", "已完成", "暂停", "剔除"])
+            data_status = st.selectbox("data_status", ["待人工确认", "数据不足", "已验证"])
+        with columns[2]:
+            st.caption("分数和 Claim 可在后续页面补充。")
+            st.caption("研究等级不是买入评级。")
+        submitted = st.form_submit_button("添加到投研任务池", width="stretch")
+
+    if submitted:
+        task = normalize_research_task(
+            {
+                "ticker": ticker,
+                "company_name": company_name,
+                "theme": theme,
+                "research_status": research_status,
+                "data_status": data_status,
+            }
+        )
+        validation = validate_research_task(task)
+        if validation["ok"]:
+            st.session_state.deep_research_tasks.append(task)
+            st.success("已添加到会话级投研任务池。")
         else:
-            row.update(
-                {
-                    "证据状态": "数据不足",
-                    "evidence_id": f"EVID____-{index}",
-                    "操作": "绑定证据 / 人工确认",
-                }
-            )
-        rows.append(row)
-    return rows
-
-
-def _ai_summary_card(title, items):
-    with st.container(border=True):
-        st.subheader(title)
-        st.write(AI_DRAFT)
-        for label, value in items:
-            st.write(f"**{label}：** {value}")
-        st.caption(f"数据状态：{DATA_STATUS}")
-
-
-def _task_card(index):
-    with st.container(border=True):
-        st.markdown(f"**股票任务：{index}**")
-        ticker = st.text_input(
-            "股票输入框",
-            key=f"deep_ticker_{index}",
-            placeholder="待配置",
-        )
-        theme = st.text_input(
-            "研究主题输入框",
-            key=f"deep_theme_{index}",
-            placeholder="待配置",
-        )
-        source = st.selectbox(
-            "来源",
-            ["手动", "选股雷达"],
-            key=f"deep_source_{index}",
-        )
-        if not ticker and not theme:
-            default_status = "未输入"
-        elif ticker and theme:
-            default_status = "待创建"
-        else:
-            default_status = "证据不足"
-        status = st.selectbox(
-            "状态",
-            ["未输入", "待创建", "证据收集中", "验证中", "证据不足", "已完成"],
-            index=["未输入", "待创建", "证据收集中", "验证中", "证据不足", "已完成"].index(default_status),
-            key=f"deep_status_{index}",
-        )
-        st.caption(f"来源：{source}；状态：{status}；数据状态：{DATA_STATUS}")
-        col_a, col_b = st.columns(2)
-        with col_a:
-            st.button("进入投研", key=f"deep_enter_{index}", width="stretch")
-        with col_b:
-            st.button("输入股票", key=f"deep_input_{index}", width="stretch")
+            st.error("；".join(validation["errors"]))
 
 
 def _render_task_pool_tab():
+    tasks = _tasks()
     st.subheader("股票任务池总览")
-    st.write("最多支持 15 只股票，所有深度投研任务必须绑定“股票 + 研究主题”。")
+    st.write("手动创建和维护“股票 + 研究主题”投研任务。")
+    render_status_badge("会话级数据")
     render_status_badge("股票 + 主题")
+    st.caption("会话级数据，可导出保存。")
+    st.caption("可从基础投研 / 候选股雷达模块将候选股转入本深度投研任务池。")
 
-    _button_row(
-        ["从选股雷达导入", "手动新增股票", "批量创建投研任务", "AI收集证据", "生成投研报告", "同步重点跟踪池"],
-        "deep_pool_action",
-    )
+    _render_task_form()
 
-    status_columns = st.columns(5)
-    status_cards = [
-        ("已输入股票", "__", "示例数据 / 待配置"),
-        ("待创建任务", "__", "数据不足"),
-        ("证据收集中", "__", AI_DRAFT),
-        ("验证中", "__", "待人工确认"),
-        ("已完成", "__", "示例数据 / 待配置"),
+    summary = build_research_summary(tasks)
+    st.markdown("### 投研任务汇总")
+    columns = st.columns(8)
+    cards = [
+        ("总任务数", summary["总任务数"], "session_state"),
+        ("S", summary["S 数量"], "研究等级"),
+        ("A", summary["A 数量"], "研究等级"),
+        ("B", summary["B 数量"], "研究等级"),
+        ("C", summary["C 数量"], "研究等级"),
+        ("D", summary["D 数量"], "研究等级"),
+        ("已完成", summary["已完成数量"], "流程状态"),
+        ("进行中", summary["进行中数量"], "流程状态"),
     ]
-    for column, (title, value, note) in zip(status_columns, status_cards):
+    for column, (title, value, note) in zip(columns, cards):
         with column:
             render_status_card(title, value, note)
 
-    st.markdown("### 股票任务卡片")
-    for row_index in range(5):
-        columns = st.columns(3)
-        for column_index, column in enumerate(columns):
-            task_index = row_index * 3 + column_index + 1
-            with column:
-                _task_card(task_index)
+    st.markdown("### 当前任务池")
+    if tasks:
+        _table(_task_rows(tasks))
+    else:
+        _table(
+            [
+                {
+                    "ticker": "数据不足",
+                    "company_name": "",
+                    "theme": "待人工确认",
+                    "research_status": "未开始",
+                    "final_research_grade": "D",
+                    "decision": "继续观察",
+                    "data_status": "数据不足",
+                    "updated_at": "",
+                }
+            ]
+        )
 
 
 def _render_single_stock_tab():
     st.subheader("单股投研工作台总览")
-    st.write("围绕单一“股票 + 研究主题”任务，集中查看证据、Claim 与研究状态。")
+    selected_index, task = _selected_task_ui("single_stock")
+    if task is None:
+        return
 
-    info_columns = st.columns(3)
-    with info_columns[0]:
-        render_status_card("当前股票", "____", "示例数据 / 待配置")
-    with info_columns[1]:
-        render_status_card("研究主题", "____", "示例数据 / 待配置")
-    with info_columns[2]:
-        render_status_card("来源", "选股雷达 / 手动输入", "数据不足")
+    total_score = calculate_total_research_score(task)
+    grade = derive_research_grade(total_score)
+    decision = derive_research_decision(grade)
 
-    _button_row(
-        ["AI收集证据", "AI提取Claim", "生成投研报告", "保存当前任务", "进入重点跟踪池", "剔除", "回写上游"],
-        "single_stock_action",
-    )
-
-    status_columns = st.columns(5)
-    status_cards = [
-        ("证据数量", "__", "数据不足"),
-        ("A/B级证据", "__", "待配置"),
-        ("Claim数量", "__", AI_DRAFT),
-        ("待确认Claim", "__", "待人工确认"),
-        ("当前等级", "未评级", "不代表交易建议"),
+    columns = st.columns(4)
+    cards = [
+        ("当前股票", task["ticker"], task.get("company_name", "")),
+        ("研究主题", task["theme"], "股票 + 主题绑定"),
+        ("总分", total_score, "满分 40"),
+        ("研究等级", grade, "不是买入评级"),
     ]
-    for column, (title, value, note) in zip(status_columns, status_cards):
+    for column, (title, value, note) in zip(columns, cards):
         with column:
             render_status_card(title, value, note)
 
-    left, right = st.columns([1.35, 1])
-    with left:
-        st.markdown("### 本次深度投研需要验证的问题")
-        _table(
-            [
-                {
-                    "序号": index,
-                    "验证问题": question,
-                    "当前状态": "数据不足",
-                    "操作": "收集证据 / 人工确认",
-                }
-                for index, question in enumerate(RESEARCH_QUESTIONS, start=1)
-            ]
-        )
-    with right:
-        st.markdown("### 投研结论面板")
-        with st.container(border=True):
-            conclusion_rows = [
-                ("当前股票", "____"),
-                ("当前主题", "____"),
-                ("当前状态", "数据不足"),
-                ("当前研究等级", "未评级"),
-                ("证据状态", "待配置"),
-                ("Claim状态", AI_DRAFT),
-                ("核心结论", "待生成 / AI草稿 / 待人工确认"),
-            ]
-            for label, value in conclusion_rows:
-                st.write(f"**{label}：** {value}")
-            st.caption(f"数据状态：{DATA_STATUS}")
-        _button_row(
-            ["生成研究等级", "生成研究报告", "进入重点跟踪池", "标记证据不足", "剔除", "回写上游模块"],
-            "single_stock_panel_action",
-        )
+    render_status_card("研究流转 decision", decision, "待人工确认")
 
-
-def _render_business_boundary_tab():
-    st.subheader("公司业务边界验证")
-    st.write("验证公司主营业务、产品、收入分部、客户类型和主题相关业务边界。")
-    _table(_verification_rows(BUSINESS_BOUNDARY_ITEMS))
-    _ai_summary_card(
-        "AI业务边界摘要",
-        [
-            ("业务边界判断", "AI草稿 / 待人工确认"),
-            ("证据缺口", "数据不足"),
-            ("人工确认状态", "待配置"),
-        ],
-    )
-    _button_row(["AI总结业务边界", "绑定证据", "确认业务边界", "标记证据不足"], "business_boundary_action")
-
-
-def _render_theme_benefit_tab():
-    st.subheader("主题受益验证")
-    st.write("验证公司是否真实受益于当前研究主题，并区分业务受益与概念相关。")
-    _table(_verification_rows(THEME_BENEFIT_ITEMS, mode="count"))
-    _ai_summary_card(
-        "AI受益逻辑草稿",
-        [
-            ("受益逻辑", "AI草稿 / 待人工确认"),
-            ("是否需要继续验证", "数据不足"),
-            ("人工确认状态", "待配置"),
-        ],
-    )
-    _button_row(["AI生成受益逻辑", "确认受益成立", "标记部分成立", "标记不成立"], "theme_benefit_action")
-
-
-def _render_chain_position_tab():
-    st.subheader("产业链位置验证")
-    st.write("验证公司对应的产业链层级、节点、稀缺性、替代难度和议价能力。")
-    _table(_verification_rows(CHAIN_POSITION_ITEMS))
-    with st.container(border=True):
-        st.subheader("产业链位置摘要")
-        summary_columns = st.columns(2)
-        with summary_columns[0]:
-            render_status_card("当前产业链层级", "____", "示例数据 / 待配置")
-            render_status_card("对应节点", "____", "数据不足")
-            render_status_card("节点等级", "核心瓶颈 / 重要受益 / 普通节点", "待人工确认")
-        with summary_columns[1]:
-            render_status_card("证据数量", "__", "示例数据 / 待配置")
-            render_status_card("证据ID", "EVID____", "待配置")
-            render_status_card("AI说明", AI_DRAFT, "需要人工确认")
-    _button_row(["绑定产业链节点", "AI解释产业链位置", "确认产业链位置", "标记待验证"], "chain_position_action")
-
-
-def _render_financial_realization_tab():
-    st.subheader("财务兑现验证")
-    st.write("验证主题相关业务是否已经在收入、毛利率、订单、指引和现金流中体现。")
-    _table(_verification_rows(FINANCIAL_REALIZATION_ITEMS))
-    with st.container(border=True):
-        st.subheader("财务兑现摘要")
-        columns = st.columns(3)
-        with columns[0]:
-            render_status_card("财务证据状态", "待验证 / 部分 / 充足", "示例数据 / 待配置")
-        with columns[1]:
-            render_status_card("是否已兑现", "是 / 否 / 无法判断", "数据不足")
-        with columns[2]:
-            render_status_card("缺失信息", "____", AI_DRAFT)
-        st.caption(f"数据状态：{DATA_STATUS}")
-    _button_row(["导入财务证据", "AI总结财务兑现", "确认财务支持", "标记尚未兑现"], "financial_realization_action")
-
-
-def _render_customer_order_capex_tab():
-    st.subheader("客户 / 订单 / CapEx 验证")
-    st.write("验证客户、订单、CapEx、扩产和需求持续性的证据状态。")
-    _table(_verification_rows(CUSTOMER_ORDER_CAPEX_ITEMS, mode="count"))
-    with st.container(border=True):
-        st.subheader("客户 / 订单 / CapEx 摘要")
-        columns = st.columns(4)
-        summary_items = [
-            ("客户证据", "____", "数据不足"),
-            ("订单证据", "____", "待配置"),
-            ("CapEx证据", "____", "示例数据 / 待配置"),
-            ("缺失证据", "____", AI_DRAFT),
-        ]
-        for column, (title, value, note) in zip(columns, summary_items):
-            with column:
-                render_status_card(title, value, note)
-        st.caption(f"数据状态：{DATA_STATUS}")
-    _button_row(["AI查找客户/订单证据", "绑定证据", "确认支持", "标记证据不足"], "customer_order_capex_action")
-
-
-def _render_competition_tab():
-    st.subheader("竞争格局验证")
-    st.write("验证主要竞争对手、技术壁垒、客户认证壁垒、规模优势和替代风险。")
-    _table(_verification_rows(COMPETITION_ITEMS, mode="count"))
-    with st.container(border=True):
-        st.subheader("竞争格局摘要")
-        columns = st.columns(4)
-        summary_items = [
-            ("竞争优势", "待验证", "示例数据 / 待配置"),
-            ("替代风险", "待验证", "数据不足"),
-            ("价格压力", "待验证", "待配置"),
-            ("证据状态", "部分 / 不足 / 充足", AI_DRAFT),
-        ]
-        for column, (title, value, note) in zip(columns, summary_items):
-            with column:
-                render_status_card(title, value, note)
-        st.caption(f"数据状态：{DATA_STATUS}")
-    _button_row(["AI总结竞争格局", "确认竞争优势", "标记无法判断", "新增竞争对手"], "competition_action")
-
-
-def _render_risk_counter_tab():
-    st.subheader("风险与反证验证")
-    st.write("验证主题受益假设中的风险、反证和未解决问题。")
+    st.markdown("### 八项验证分数")
     _table(
         [
             {
-                "编号": index,
-                "风险 / 反证": item,
-                "严重程度": ["高", "中", "低", "中"][index - 1],
-                "状态": ["待验证", "未解决", "已解决", "待验证"][index - 1],
-                "evidence_id": f"EVID____-{index}",
-                "操作": "查看证据 / 人工确认",
+                "验证项": SCORE_LABELS[field],
+                "分数": task.get(field, 0),
+                "状态": "待人工确认",
             }
-            for index, item in enumerate(RISK_COUNTER_ITEMS, start=1)
+            for field in SCORE_FIELDS
+        ]
+    )
+
+    st.markdown("### 核心验证问题")
+    _table(
+        [
+            {
+                "序号": index,
+                "验证问题": question,
+                "当前状态": "待人工确认",
+                "操作": "补充证据 / 人工确认",
+            }
+            for index, question in enumerate(RESEARCH_QUESTIONS, start=1)
+        ]
+    )
+
+
+def _render_simple_validation_tab(title, items):
+    st.subheader(title)
+    st.write("当前页面保留验证边界，支持后续逐项补充证据。")
+    _table(
+        [
+            {
+                "验证项": item,
+                "当前判断": "待人工确认",
+                "证据状态": "数据不足",
+                "evidence_id": f"EVID____-{index}",
+                "操作": "补充 / 确认",
+            }
+            for index, item in enumerate(items, start=1)
         ]
     )
     with st.container(border=True):
-        st.subheader("重大反证摘要")
-        columns = st.columns(3)
-        with columns[0]:
-            render_status_card("是否存在重大反证", "是 / 否 / 待验证", "示例数据 / 待配置")
-        with columns[1]:
-            render_status_card("最高风险等级", "____", "数据不足")
-        with columns[2]:
-            render_status_card("需要补充证据", "____", AI_DRAFT)
+        st.subheader(f"{title}摘要")
+        st.write(AI_DRAFT)
         st.caption(f"数据状态：{DATA_STATUS}")
-    _button_row(["AI查找反证", "新增风险", "风险已解决", "标记重大反证"], "risk_counter_action")
 
 
 def _render_claim_tab():
     st.subheader("Claim 验证")
-    render_status_badge("evidence_id 必需")
-    st.write("验证 Claim 的标签、证据绑定和支持状态。")
+    selected_index, task = _selected_task_ui("claim")
+    if task is None:
+        return
+
+    st.caption("没有证据备注的 Claim 不能进入事实区。")
+    with st.form("claim_evidence_form"):
+        claim_text = st.text_area("手动添加 Claim", value="\n".join(task.get("key_claims", [])))
+        evidence_note = st.text_area("手动添加 evidence_note", value=task.get("evidence_notes", ""))
+        counter_evidence = st.text_area("手动添加 counter_evidence", value=task.get("counter_evidence", ""))
+        submitted = st.form_submit_button("保存 Claim / Evidence / Counter Evidence", width="stretch")
+
+    if submitted:
+        updated = {
+            **task,
+            "key_claims": [line.strip() for line in claim_text.splitlines() if line.strip()],
+            "evidence_notes": evidence_note.strip(),
+            "counter_evidence": counter_evidence.strip(),
+        }
+        updated = normalize_research_task(updated)
+        st.session_state.deep_research_tasks[selected_index] = updated
+        task = updated
+        st.success("已保存到会话级投研任务。")
+
+    st.markdown("### 当前 Claim 记录")
+    claims = task.get("key_claims", [])
     _table(
         [
             {
                 "编号": index,
                 "Claim": claim,
-                "标签": ["事实", "推断", "待验证", "假设"][index - 1],
-                "支持状态": ["已证实", "部分支持", "证据不足", "被反证"][index - 1],
-                "证据ID": f"evidence_id：EVID____-{index}",
-                "操作": "绑定证据 / 人工确认",
+                "标签": "待验证",
+                "支持状态": "待人工确认" if task.get("evidence_notes") else "数据不足",
+                "证据备注": task.get("evidence_notes") or "数据不足",
             }
-            for index, claim in enumerate(CLAIM_ITEMS, start=1)
+            for index, claim in enumerate(claims or ["数据不足"], start=1)
         ]
     )
-    st.markdown("### Claim 审核状态")
-    columns = st.columns(5)
-    status_cards = [
-        ("Claim总数", "__", "示例数据 / 待配置"),
-        ("已证实", "__", "待配置"),
-        ("部分支持", "__", "数据不足"),
-        ("证据不足", "__", AI_DRAFT),
-        ("被反证", "__", "待人工确认"),
-    ]
-    for column, (title, value, note) in zip(columns, status_cards):
-        with column:
-            render_status_card(title, value, note)
-    _button_row(["AI提取Claim", "批量确认事实", "批量标记待验证", "删除无证据Claim", "绑定证据"], "claim_action")
+    with st.container(border=True):
+        st.subheader("反证与风险")
+        st.write(task.get("counter_evidence") or "数据不足")
+        st.caption(f"数据状态：{task.get('data_status', '待人工确认')}")
 
 
 def _render_report_grade_tab():
     st.subheader("研究报告与等级")
-    render_status_badge("研究等级")
-    st.write("汇总证据、Claim、风险与人工确认状态，生成研究报告草稿和研究等级。")
-    _table(
-        [
-            {
-                "评分项": item,
-                "分数": "示例数据 / 待配置",
-                "状态": "数据不足",
-            }
-            for item in REPORT_SCORE_ITEMS
-        ]
-    )
+    selected_index, task = _selected_task_ui("report")
+    if task is None:
+        return
 
-    st.markdown("### 最终研究等级")
-    grade_columns = st.columns(5)
-    grades = [
-        ("S", "进入核心跟踪池"),
-        ("A", "进入重点跟踪池"),
-        ("B", "进入观察池"),
-        ("C", "证据不足，继续观察"),
-        ("D", "剔除"),
-    ]
-    for column, (grade, description) in zip(grade_columns, grades):
+    st.caption("手动评分，待人工确认。")
+    st.markdown("### 当前投研任务")
+    task_columns = st.columns(5)
+    for column, (title, value, note) in zip(
+        task_columns,
+        [
+            ("ticker", task.get("ticker", ""), "股票代码"),
+            ("theme", task.get("theme", ""), "研究主题"),
+            ("final_research_grade", task.get("final_research_grade", ""), "研究等级"),
+            ("decision", task.get("decision", ""), "研究流转"),
+            ("data_status", task.get("data_status", "待人工确认"), "会话级"),
+        ],
+    ):
         with column:
-            render_status_card(grade, description, "不代表交易建议")
+            render_status_card(title, value or "数据不足", note)
 
-    st.markdown("### 研究报告草稿")
     with st.container(border=True):
-        st.write("AI草稿 / 待人工确认")
-        st.write("AI生成报告草稿，必须人工确认后才能进入重点跟踪池。")
-        st.write("核心结论：待生成 / AI草稿 / 待人工确认")
-        st.caption(f"数据状态：{DATA_STATUS}")
+        st.subheader("证据与反证摘要")
+        st.write(f"evidence_notes：{task.get('evidence_notes') or '数据不足'}")
+        st.write(f"counter_evidence：{task.get('counter_evidence') or '数据不足'}")
+        st.caption("研究流程流转。")
 
-    _button_row(["AI生成报告", "人工确认等级", "进入重点跟踪池", "剔除", "回写上游模块"], "report_grade_action")
+    with st.form("research_score_form"):
+        st.markdown("### 八项验证分数")
+        score_columns = st.columns(2)
+        score_values = {}
+        for index, field in enumerate(SCORE_FIELDS):
+            with score_columns[index % 2]:
+                score_values[field] = st.number_input(
+                    SCORE_LABELS[field],
+                    min_value=0.0,
+                    max_value=5.0,
+                    value=float(task.get(field, 0)),
+                    step=0.5,
+                    key=f"score_{field}",
+                )
+        submitted = st.form_submit_button("生成研究等级", width="stretch")
 
+    if submitted:
+        updated = {**task, **score_values}
+        total_score = calculate_total_research_score(updated)
+        grade = derive_research_grade(total_score)
+        updated["final_research_grade"] = grade
+        updated["decision"] = derive_research_decision(grade)
+        updated = normalize_research_task(updated)
+        validation = validate_research_task(updated)
+        if validation["ok"]:
+            st.session_state.deep_research_tasks[selected_index] = updated
+            task = updated
+            st.success("已生成并保存研究等级。")
+        else:
+            st.error("；".join(validation["errors"]))
 
-def _render_placeholder_tab(title):
-    st.subheader(title)
-    st.write("本页为简洁占位，后续阶段再扩展正式 UI。")
-    _table(
+    total_score = calculate_total_research_score(task)
+    grade = derive_research_grade(total_score)
+    decision = derive_research_decision(grade)
+    columns = st.columns(4)
+    for column, (title, value, note) in zip(
+        columns,
         [
-            {
-                "股票": "示例数据 / 待配置",
-                "研究主题": "示例数据 / 待配置",
-                "evidence_id": "待配置",
-                "Claim状态": AI_DRAFT,
-                "人工确认状态": "数据不足",
-            }
-        ]
+            ("总分", total_score, "满分 40"),
+            ("研究等级", grade, "S/A/B/C/D"),
+            ("研究流转", decision, "流程流转"),
+            ("数据状态", task.get("data_status", "待人工确认"), "会话级"),
+        ],
+    ):
+        with column:
+            render_status_card(title, value, note)
+
+    st.markdown("### 研究报告摘要")
+    with st.container(border=True):
+        st.write(f"股票代码：{task.get('ticker')}")
+        st.write(f"研究主题：{task.get('theme')}")
+        st.write(f"八项验证分数：{', '.join(f'{SCORE_LABELS[field]}={task.get(field, 0)}' for field in SCORE_FIELDS)}")
+        st.write(f"总分：{total_score}")
+        st.write(f"研究等级：{grade}")
+        st.write(f"研究流转 decision：{decision}")
+        st.write(f"核心 Claim：{'；'.join(task.get('key_claims', [])) or '数据不足'}")
+        st.write(f"证据备注：{task.get('evidence_notes') or '数据不足'}")
+        st.write(f"反证与风险：{task.get('counter_evidence') or '数据不足'}")
+        st.caption("研究等级与流转均需人工确认。")
+
+    if st.button("转入重点跟踪池", key="transfer_to_tracking_pool", width="stretch"):
+        transfer_check = can_transfer_to_tracking_pool(task)
+        if not transfer_check["ok"]:
+            st.warning(transfer_check["reason"])
+        else:
+            _init_tracking_pool()
+            tracking_item = build_tracking_item_from_research_task(task)
+            st.session_state.tracking_pool = upsert_tracking_item(st.session_state.tracking_pool, tracking_item)
+            st.success("已转入重点跟踪池。")
+            st.caption("已转入重点跟踪池。")
+
+    export_df = pd.DataFrame(_task_rows(_tasks()))
+    csv_data = export_df.to_csv(index=False).encode("utf-8-sig")
+    st.download_button(
+        "导出 deep_research_tasks 为 CSV",
+        data=csv_data,
+        file_name="deep_research_tasks_export.csv",
+        mime="text/csv",
+        width="stretch",
     )
 
 
 def render():
     render_section_title(
         "深度投研模块",
-        "对“股票 + 主题”进行证据驱动的公司级验证，判断是否进入重点跟踪池。",
+        "对“股票 + 主题”进行证据驱动的公司级验证，判断研究流转方向。",
     )
-    render_demo_notice()
+    render_status_badge("会话级数据")
+    render_status_badge("待人工确认")
+    render_status_badge("数据不足")
     st.caption(f"全局数据状态：{DATA_STATUS}")
 
     tabs = st.tabs(TABS)
+    validation_items = {
+        2: ("公司业务边界验证", ["公司主营业务", "主要产品", "收入分部", "客户类型", "主题相关业务是否核心业务", "是否只是边缘业务"]),
+        3: ("主题受益验证", ["业务相关性", "收入暴露度", "订单 / 客户证据", "管理层是否确认该方向", "产业链节点匹配度", "是否只是概念相关"]),
+        4: ("产业链位置验证", ["所属产业链层级", "对应产业链节点", "是否处于核心瓶颈节点", "是否具备稀缺性", "是否难以替代", "是否具备议价能力"]),
+        5: ("财务兑现验证", ["收入增长", "收入分部变化", "毛利率变化", "订单 / Backlog", "管理层指引", "现金流"]),
+        6: ("客户 / 订单 / CapEx 验证", ["客户证据", "订单证据", "CapEx相关性", "公司扩产", "客户需求持续性"]),
+        7: ("竞争格局验证", ["主要竞争对手", "技术壁垒", "客户认证壁垒", "规模优势", "替代风险", "价格竞争风险"]),
+        8: ("风险与反证验证", ["主题相关业务可能不是核心业务", "公司没有明确披露该方向", "订单证据不足", "竞争对手更强"]),
+    }
+
     for index, tab in enumerate(tabs):
         with tab:
             if index == 0:
                 _render_task_pool_tab()
             elif index == 1:
                 _render_single_stock_tab()
-            elif index == 2:
-                _render_business_boundary_tab()
-            elif index == 3:
-                _render_theme_benefit_tab()
-            elif index == 4:
-                _render_chain_position_tab()
-            elif index == 5:
-                _render_financial_realization_tab()
-            elif index == 6:
-                _render_customer_order_capex_tab()
-            elif index == 7:
-                _render_competition_tab()
-            elif index == 8:
-                _render_risk_counter_tab()
             elif index == 9:
                 _render_claim_tab()
             elif index == 10:
                 _render_report_grade_tab()
-            else:
-                _render_placeholder_tab(TABS[index])
+            elif index in validation_items:
+                title, items = validation_items[index]
+                _render_simple_validation_tab(title, items)
