@@ -1,0 +1,51 @@
+{
+  "version": "0.1",
+  "stage": "Phase 7B",
+  "description": "深度投研任务示例结构。当前不是投资建议，不是交易指令。",
+  "records": [
+    {
+      "task_id": "TASK-EXAMPLE1",
+      "ticker": "EXAMPLE1",
+      "company_name": "",
+      "theme": "示例主题1",
+      "research_status": "未开始",
+      "business_boundary_score": 0,
+      "theme_benefit_score": 0,
+      "supply_chain_position_score": 0,
+      "financial_realization_score": 0,
+      "customer_order_capex_score": 0,
+      "competition_score": 0,
+      "risk_counterevidence_score": 0,
+      "claim_evidence_score": 0,
+      "key_claims": [],
+      "evidence_notes": "",
+      "counter_evidence": "",
+      "final_research_grade": "D",
+      "decision": "剔除",
+      "data_status": "待人工确认",
+      "updated_at": ""
+    },
+    {
+      "task_id": "TASK-EXAMPLE2",
+      "ticker": "EXAMPLE2",
+      "company_name": "",
+      "theme": "示例主题2",
+      "research_status": "未开始",
+      "business_boundary_score": 0,
+      "theme_benefit_score": 0,
+      "supply_chain_position_score": 0,
+      "financial_realization_score": 0,
+      "customer_order_capex_score": 0,
+      "competition_score": 0,
+      "risk_counterevidence_score": 0,
+      "claim_evidence_score": 0,
+      "key_claims": [],
+      "evidence_notes": "",
+      "counter_evidence": "",
+      "final_research_grade": "D",
+      "decision": "剔除",
+      "data_status": "待人工确认",
+      "updated_at": ""
+    }
+  ]
+}

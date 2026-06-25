@@ -1,0 +1,41 @@
+{
+  "version": "0.1",
+  "stage": "Phase 7A",
+  "description": "重点跟踪池示例结构。当前不是投资建议，不是交易指令。",
+  "records": [
+    {
+      "ticker": "EXAMPLE1",
+      "company_name": "",
+      "theme": "示例主题1",
+      "research_grade": "B",
+      "tracking_status": "观察",
+      "position_status": "未持有",
+      "buy_price": null,
+      "take_profit_price": null,
+      "stop_loss_price": null,
+      "catalyst": "",
+      "risk": "",
+      "next_review_date": "",
+      "evidence_note": "示例结构，待人工确认。",
+      "data_status": "待人工确认",
+      "updated_at": ""
+    },
+    {
+      "ticker": "EXAMPLE2",
+      "company_name": "",
+      "theme": "示例主题2",
+      "research_grade": "C",
+      "tracking_status": "观察",
+      "position_status": "观察中",
+      "buy_price": null,
+      "take_profit_price": null,
+      "stop_loss_price": null,
+      "catalyst": "",
+      "risk": "",
+      "next_review_date": "",
+      "evidence_note": "示例结构，待人工确认。",
+      "data_status": "待人工确认",
+      "updated_at": ""
+    }
+  ]
+}
