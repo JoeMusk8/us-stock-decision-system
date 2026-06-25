@@ -2,6 +2,7 @@ import streamlit as st
 
 from core.utils import render_clean_table, render_metric_card, render_page_header
 from core.workflow_overview import build_workflow_overview, build_workspace_counts, suggest_next_step
+from core.workspace_quality import build_quality_checks, build_quality_summary
 
 
 def _render_metric_grid(counts):
@@ -26,6 +27,7 @@ def render():
     )
 
     counts = build_workspace_counts(st.session_state)
+    quality = build_quality_summary(st.session_state)
     _render_metric_grid(counts)
 
     st.markdown("### 主链路进度")
@@ -43,5 +45,10 @@ def render():
             [
                 {"项目": "主链路总记录", "数量": counts["total_records"]},
                 {"项目": "已配置价格标注", "数量": counts["strategy_configured"]},
+                {"项目": "质量状态", "数量": quality["status"]},
+                {"项目": "待处理项", "数量": quality["issue_count"]},
             ]
         )
+
+    st.markdown("### 工作区质量检查")
+    render_clean_table(build_quality_checks(st.session_state))
