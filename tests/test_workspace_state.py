@@ -15,16 +15,18 @@ def sample_session():
         "candidate_stocks": [{"ticker": "EXAMPLE1"}],
         "deep_research_tasks": [{"ticker": "EXAMPLE1", "theme": "AI 光互连"}],
         "tracking_pool": [{"ticker": "EXAMPLE1", "theme": "AI 光互连"}],
+        "sec_company_snapshots": {"EXAMPLE1": {"ticker": "EXAMPLE1", "cik": "0000000001"}},
     }
 
 
 def test_build_workspace_snapshot_keeps_workspace_keys():
-    snapshot = build_workspace_snapshot(sample_session())
+    source = sample_session()
+    snapshot = build_workspace_snapshot(source)
     assert snapshot["schema_version"]
     assert snapshot["exported_at"]
     for key in WORKSPACE_KEYS:
         assert key in snapshot
-        assert snapshot[key] == sample_session()[key]
+        assert snapshot[key] == source[key]
 
 
 def test_to_json_bytes_and_from_json_text_roundtrip():
@@ -34,6 +36,7 @@ def test_to_json_bytes_and_from_json_text_roundtrip():
     parsed = from_json_text(data.decode("utf-8"))
     assert parsed["ok"] is True
     assert parsed["snapshot"]["candidate_stocks"] == snapshot["candidate_stocks"]
+    assert parsed["snapshot"]["sec_company_snapshots"] == snapshot["sec_company_snapshots"]
 
 
 def test_invalid_json_returns_error():
