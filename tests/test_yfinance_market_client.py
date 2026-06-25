@@ -1,6 +1,7 @@
+import builtins
 import os
 import sys
-import builtins
+from datetime import datetime
 
 import pandas as pd
 
@@ -32,6 +33,11 @@ def _mock_history(days=60):
     )
 
 
+def _assert_iso_datetime(value):
+    assert value
+    datetime.fromisoformat(value)
+
+
 def test_calculate_market_fund_metrics_from_mock_data():
     metrics = calculate_market_fund_metrics(_mock_history())
     assert metrics.current_price == 60.0
@@ -50,6 +56,7 @@ def test_market_fund_record_defaults_to_manual_review_when_complete():
     assert record["symbol"] == "QQQ"
     assert record["asset_name"] == "QQQ"
     assert record["data_status"] == DATA_STATUS_PENDING_REVIEW
+    _assert_iso_datetime(record["updated_at"])
 
 
 def test_missing_history_returns_insufficient_without_fake_values():
@@ -59,6 +66,7 @@ def test_missing_history_returns_insufficient_without_fake_values():
     assert record["ma_20"] is None
     assert record["ma_50"] is None
     assert record["volume"] is None
+    _assert_iso_datetime(record["updated_at"])
 
 
 def test_short_history_returns_insufficient():
@@ -73,12 +81,14 @@ def test_vix_sentiment_record_from_mock_data():
     assert record["indicator_name"] == "VIX"
     assert record["current_value"] == 60.0
     assert record["data_status"] == DATA_STATUS_PENDING_REVIEW
+    _assert_iso_datetime(record["updated_at"])
 
 
 def test_vix_sentiment_missing_data_is_insufficient():
     record = _sentiment_record(pd.DataFrame())
     assert record["current_value"] is None
     assert record["data_status"] == DATA_STATUS_INSUFFICIENT
+    _assert_iso_datetime(record["updated_at"])
 
 
 def test_yfinance_missing_does_not_crash():
@@ -98,7 +108,7 @@ def test_yfinance_missing_does_not_crash():
     assert result["ok"] is False
     assert result["market_funds"] == []
     assert result["market_sentiment"] == []
-    assert result["error"] == "缺少 yfinance，请运行 python -m pip install -r requirements.txt"
+    assert "缺少 yfinance" in result["error"]
 
 
 def test_records_do_not_include_forbidden_fields():

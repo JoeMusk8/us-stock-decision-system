@@ -1,5 +1,10 @@
-﻿import streamlit as st
+import streamlit as st
 
+from core.market_environment_rules import (
+    evaluate_market_funds,
+    evaluate_market_sentiment,
+    evaluate_overall_market_environment,
+)
 from core.yfinance_market_client import fetch_market_environment_data
 from core.utils import render_section_title, render_status_badge, render_status_card
 
@@ -16,8 +21,6 @@ TABS = [
 DATA_STATUS = "待人工确认 / 数据不足"
 AI_DRAFT = "AI草稿 / 待人工确认"
 
-MARKET_ASSETS = ["QQQ", "^IXIC", "BTC-USD"]
-SENTIMENT_INDICATORS = ["^VIX"]
 MACRO_VARIABLES = ["核心利率", "核心通胀", "核心就业", "核心GDP", "原油"]
 EVENT_CATEGORIES = ["财报", "FOMC", "CPI", "PPI", "非农就业", "GDP", "原油库存", "重要行业会议", "政策事件"]
 
@@ -42,9 +45,52 @@ def _display_value(value):
     return value
 
 
+def _short_error(market_result):
+    if not market_result.get("errors"):
+        return market_result.get("error", "")
+    joined = "；".join(str(item).splitlines()[0] for item in market_result["errors"][:3])
+    return joined[:240]
+
+
+def _latest_updated_at(records):
+    values = [record.get("updated_at") for record in records if record.get("updated_at")]
+    return max(values) if values else "数据不足"
+
+
+def _asset_environment_status(record):
+    if record.get("data_status") == "数据不足":
+        return "数据不足"
+    required = [
+        record.get("current_price"),
+        record.get("ma_20"),
+        record.get("ma_50"),
+        record.get("above_ma20"),
+        record.get("above_ma50"),
+        record.get("ma_20_direction"),
+        record.get("ma_50_direction"),
+    ]
+    if any(value is None for value in required):
+        return "数据不足"
+    if record.get("above_ma20") is True and record.get("above_ma50") is True:
+        if record.get("ma_20_direction") != "向下" and record.get("ma_50_direction") != "向下":
+            return "支持"
+        return "谨慎"
+    if record.get("above_ma20") is False or record.get("above_ma50") is False:
+        return "不支持"
+    return "谨慎"
+
+
 @st.cache_data(ttl=300, show_spinner=False)
 def _load_market_context():
-    return fetch_market_environment_data()
+    result = fetch_market_environment_data()
+    market_funds = result.get("market_funds", [])
+    market_sentiment = result.get("market_sentiment", [])
+    return {
+        **result,
+        "funds_evaluation": evaluate_market_funds(market_funds),
+        "sentiment_evaluation": evaluate_market_sentiment(market_sentiment),
+        "overall_evaluation": evaluate_overall_market_environment(market_funds, market_sentiment),
+    }
 
 
 def _market_fund_rows(market_funds):
@@ -61,10 +107,8 @@ def _market_fund_rows(market_funds):
             "相对成交量": _display_value(record.get("relative_volume")),
             "是否站上20日均线": _display_value(record.get("above_ma20")),
             "是否站上50日均线": _display_value(record.get("above_ma50")),
-            "是否强于基准": _display_value(record.get("stronger_than_benchmark")),
-            "风险偏好扩散": _display_value(record.get("risk_appetite_spread")),
             "数据状态": record.get("data_status", "数据不足"),
-            "说明": record.get("note", "数据不足"),
+            "更新时间": _display_value(record.get("updated_at")),
         }
         for record in market_funds
     ]
@@ -80,10 +124,16 @@ def _market_sentiment_rows(market_sentiment):
             "风险含义": _display_value(record.get("risk_meaning")),
             "变化方向": _display_value(record.get("direction")),
             "数据状态": record.get("data_status", "数据不足"),
-            "说明": record.get("note", "数据不足"),
+            "更新时间": _display_value(record.get("updated_at")),
         }
         for record in market_sentiment
     ]
+
+
+def _render_error_if_needed(market_result):
+    error = _short_error(market_result)
+    if error:
+        st.caption(f"数据读取状态：{error}")
 
 
 def _render_main_tab():
@@ -93,125 +143,120 @@ def _render_main_tab():
     all_records = market_funds + market_sentiment
     pending_count = sum(1 for record in all_records if record.get("data_status") == "待人工确认")
     insufficient_count = sum(1 for record in all_records if record.get("data_status") == "数据不足")
+    overall = market_result["overall_evaluation"]
 
     st.subheader("市场环境监控主页面")
     st.write("汇总市场资金、市场情绪和宏观环境，形成辅助风控判断。")
     _button_row(["刷新市场环境", "AI总结市场状态", "更新风险等级", "导出市场摘要"], "market_main_action")
 
+    st.markdown("### 当前市场环境结论")
+    columns = st.columns(5)
+    conclusion_cards = [
+        ("整体状态", overall["status"], "规则计算"),
+        ("资金状态", overall["funds_status"], "QQQ / ^IXIC / BTC-USD"),
+        ("情绪状态", overall["sentiment_status"], "^VIX"),
+        ("更新时间", _latest_updated_at(all_records), "UTC"),
+        ("数据不足", insufficient_count, "缺失或失败"),
+    ]
+    for column, (title, value, note) in zip(columns, conclusion_cards):
+        with column:
+            render_status_card(title, value, note)
+
+    with st.container(border=True):
+        st.subheader("简短原因")
+        st.write(overall["reason"])
+        st.caption("市场环境状态需人工确认。")
+
     st.markdown("### 真实行情数据状态")
-    data_columns = st.columns(5)
+    data_columns = st.columns(4)
     data_cards = [
         ("数据来源", "yfinance", "QQQ / ^IXIC / BTC-USD / ^VIX"),
-        ("市场资金记录", len(market_funds), "QQQ / ^IXIC / BTC-USD"),
+        ("市场资金记录", len(market_funds), "3 个资产"),
         ("市场情绪记录", len(market_sentiment), "^VIX"),
         ("待人工确认", pending_count, "首次真实数据状态"),
-        ("数据不足", insufficient_count, "失败或缺失时显示"),
     ]
     for column, (title, value, note) in zip(data_columns, data_cards):
         with column:
             render_status_card(title, value, note)
-
-    if market_result["errors"]:
-        st.caption("；".join(market_result["errors"]))
-    if market_result.get("error") and not market_result["market_funds"] and not market_result["market_sentiment"]:
-        st.caption(market_result["error"])
-
-    columns = st.columns(5)
-    status_cards = [
-        ("市场资金状态", "支持 / 谨慎 / 不支持", "待配置 / 数据不足"),
-        ("市场情绪状态", "低风险 / 中性 / 高风险", "数据不足"),
-        ("宏观环境状态", "支持 / 中性 / 压制", "待配置"),
-        ("综合风险等级", "低 / 中 / 高", AI_DRAFT),
-        ("环境支持度", "支持 / 谨慎 / 不支持", "辅助风控判断"),
-    ]
-    for column, (title, value, note) in zip(columns, status_cards):
-        with column:
-            render_status_card(title, value, note)
+    _render_error_if_needed(market_result)
 
     st.markdown("### 三类环境摘要")
     left, middle, right = st.columns(3)
     with left:
         with st.container(border=True):
             st.subheader("市场资金摘要")
-            render_status_card("风险偏好扩散", "数据不足", DATA_STATUS)
-            render_status_card("均线结构", "待人工确认", "20日 / 50日均线")
+            render_status_card("资金状态", market_result["funds_evaluation"]["status"], "20日 / 50日均线")
+            render_status_card("有效支持数量", market_result["funds_evaluation"]["support_count"], "规则统计")
     with middle:
         with st.container(border=True):
             st.subheader("市场情绪摘要")
-            render_status_card("恐慌程度", _display_value(market_sentiment[0].get("current_value") if market_sentiment else None), "^VIX")
-            render_status_card("数据状态", market_sentiment[0].get("data_status", "数据不足") if market_sentiment else "数据不足", "yfinance")
+            render_status_card("VIX 当前值", _display_value(market_result["sentiment_evaluation"]["vix_value"]), "^VIX")
+            render_status_card("情绪状态", market_result["sentiment_evaluation"]["status"], "规则统计")
     with right:
         with st.container(border=True):
             st.subheader("宏观环境摘要")
             render_status_card("利率 / 通胀 / 就业", "待配置", "待配置 / 数据不足")
             render_status_card("宏观压制", "数据不足", "待人工确认")
 
-    st.markdown("### 当前环境状态")
-    bottom_columns = st.columns(2)
-    with bottom_columns[0]:
-        render_status_card("当前风险偏好方向", "上升 / 下降 / 分化", "待配置 / 数据不足")
-    with bottom_columns[1]:
-        render_status_card("当前结论", "数据不足 / 待配置 / AI草稿 / 待人工确认", "待人工确认")
-
 
 def _render_funding_tab():
     market_result = _load_market_context()
+    funds_eval = market_result["funds_evaluation"]
 
     st.subheader("市场资金监控")
-    st.write("页面回答：当前市场资金是否支持交易？")
+    st.write("页面回答：当前市场资金环境是否支持风险偏好。")
     render_status_badge("yfinance")
     render_status_badge("待人工确认")
-    if market_result["errors"]:
-        st.caption("；".join(market_result["errors"]))
-    if market_result.get("error") and not market_result["market_funds"]:
-        st.caption(market_result["error"])
+    _render_error_if_needed(market_result)
     _table(_market_fund_rows(market_result["market_funds"]))
 
+    st.markdown("### 资金环境解释")
+    columns = st.columns(3)
+    for column, record in zip(columns, market_result["market_funds"]):
+        with column:
+            with st.container(border=True):
+                st.subheader(record.get("asset_name", "数据不足"))
+                render_status_card("状态", _asset_environment_status(record), record.get("symbol", ""))
+                render_status_card("数据状态", record.get("data_status", "数据不足"), _display_value(record.get("updated_at")))
+
     with st.container(border=True):
-        st.subheader("风险偏好判断规则")
-        st.write("如果 QQQ、纳斯达克指数、比特币均站上 20日 / 50日均线，且均线方向向上，说明风险偏好较强。")
-        st.write("如果只有部分资产站上均线，说明风险偏好分化。")
-        st.write("如果多数资产跌破 20日 / 50日均线，说明风险偏好下降。")
-        st.caption(f"数据状态：{DATA_STATUS}")
+        st.subheader("规则解释")
+        st.write(funds_eval["reason"])
+        st.caption(
+            f"支持：{funds_eval['support_count']}；谨慎：{funds_eval['caution_count']}；"
+            f"不支持：{funds_eval['weak_count']}；数据不足：{funds_eval['insufficient_count']}"
+        )
 
 
 def _render_sentiment_tab():
     market_result = _load_market_context()
+    sentiment_eval = market_result["sentiment_evaluation"]
 
     st.subheader("市场情绪监控")
-    st.write("页面回答：当前市场情绪是否过热或恐慌？")
+    st.write("页面回答：当前市场情绪是否过热或恐慌。")
     render_status_badge("yfinance")
     render_status_badge("待人工确认")
-    if market_result["errors"]:
-        st.caption("；".join(market_result["errors"]))
-    if market_result.get("error") and not market_result["market_sentiment"]:
-        st.caption(market_result["error"])
+    _render_error_if_needed(market_result)
     _table(_market_sentiment_rows(market_result["market_sentiment"]))
 
-    st.markdown("### 指标解释")
+    st.markdown("### 情绪环境解释")
     columns = st.columns(3)
-    explanations = [
-        ("VIX", "用于观察市场恐慌程度"),
-        ("Put / Call", "用于观察期权市场风险偏好"),
-        ("数据状态", DATA_STATUS),
-    ]
-    for column, (title, body) in zip(columns, explanations):
-        with column:
-            with st.container(border=True):
-                st.subheader(title)
-                st.write(body)
-                st.caption(f"数据状态：{DATA_STATUS}")
+    with columns[0]:
+        render_status_card("VIX 当前值", _display_value(sentiment_eval["vix_value"]), "^VIX")
+    with columns[1]:
+        render_status_card("VIX 状态", sentiment_eval["status"], "内部启发式规则")
+    with columns[2]:
+        render_status_card("数据状态", market_result["market_sentiment"][0].get("data_status", "数据不足") if market_result["market_sentiment"] else "数据不足", "待人工确认")
 
     with st.container(border=True):
-        st.subheader("AI市场情绪摘要")
-        st.write(AI_DRAFT)
-        st.write("当前仅展示 ^VIX，结论需人工确认。")
-        st.caption(f"数据状态：{DATA_STATUS}")
+        st.subheader("规则解释")
+        st.write(sentiment_eval["reason"])
+        st.caption("VIX 阈值为项目内部市场环境启发式规则。")
 
 
 def _render_macro_tab():
     st.subheader("宏观环境监控")
-    st.write("页面回答：当前宏观环境是否支持交易？")
+    st.write("页面回答：当前宏观环境是否支持风险偏好。")
     _table(
         [
             {
@@ -243,48 +288,41 @@ def _render_macro_tab():
 
 def _render_conclusion_tab():
     market_result = _load_market_context()
-    records = market_result["market_funds"] + market_result["market_sentiment"]
-    all_insufficient = bool(records) and all(record.get("data_status") == "数据不足" for record in records)
+    overall = market_result["overall_evaluation"]
 
     st.subheader("市场环境结论")
-    st.write("页面回答：当前市场是否支持交易？")
+    st.write("页面回答：当前市场环境状态如何。")
     render_status_badge("yfinance")
     render_status_badge("待人工确认")
 
     columns = st.columns(4)
-    if all_insufficient:
-        summary_cards = [
-            ("风险等级", "数据不足", "yfinance"),
-            ("环境支持度", "数据不足", "待人工确认"),
-            ("风险偏好方向", "数据不足", "yfinance"),
-            ("当前结论", "数据不足", "待人工确认"),
-        ]
-    else:
-        summary_cards = [
-            ("风险等级", "数据不足", "待人工确认"),
-            ("环境支持度", "数据不足", "待人工确认"),
-            ("风险偏好方向", "数据不足", "待人工确认"),
-            ("当前结论", "数据不足 / AI草稿 / 待人工确认", "需人工确认"),
-        ]
+    summary_cards = [
+        ("整体状态", overall["status"], "规则计算"),
+        ("资金状态", overall["funds_status"], "20日 / 50日均线"),
+        ("情绪状态", overall["sentiment_status"], "^VIX"),
+        ("更新时间", _latest_updated_at(market_result["market_funds"] + market_result["market_sentiment"]), "UTC"),
+    ]
     for column, (title, value, note) in zip(columns, summary_cards):
         with column:
             render_status_card(title, value, note)
 
     st.markdown("### 分项结论")
     conclusion_columns = st.columns(3)
-    for column, title in zip(conclusion_columns, ["市场资金结论", "市场情绪结论", "宏观环境结论"]):
+    for column, title, body in zip(
+        conclusion_columns,
+        ["市场资金结论", "市场情绪结论", "宏观环境结论"],
+        [market_result["funds_evaluation"]["reason"], market_result["sentiment_evaluation"]["reason"], "宏观环境数据仍为待配置 / 数据不足。"],
+    ):
         with column:
             with st.container(border=True):
                 st.subheader(title)
-                st.write(AI_DRAFT)
-                st.write("当前结论需人工确认。")
+                st.write(body)
                 st.caption(f"数据状态：{DATA_STATUS}")
 
     with st.container(border=True):
         st.subheader("市场环境综合判断")
-        st.write(AI_DRAFT)
-        st.write("综合判断需人工确认。")
-        st.caption(f"数据状态：{DATA_STATUS}")
+        st.write(overall["reason"])
+        st.caption("当前结论为市场环境状态，需人工确认。")
 
     _button_row(["AI生成市场结论", "人工确认结论", "标记数据不足", "导出市场摘要"], "market_conclusion_action")
 
@@ -321,22 +359,6 @@ def _render_calendar_tab():
     _button_row(["新增事件", "创建提醒", "标记已处理", "导出事件日历"], "calendar_action")
 
 
-def _render_placeholder_tab(title):
-    st.subheader(title)
-    st.write("本页为 Phase 2B-5A 简洁占位，后续阶段再扩展正式 UI。")
-    _table(
-        [
-            {
-                "分类": title,
-                "指标": "待配置 / 数据不足",
-                "当前状态": "数据不足",
-                "数据状态": DATA_STATUS,
-                "evidence_id": "待配置",
-            }
-        ]
-    )
-
-
 def render():
     render_section_title(
         "市场资金 / 情绪 / 宏观监控模块",
@@ -365,5 +387,3 @@ def render():
                 _render_conclusion_tab()
             elif index == 5:
                 _render_calendar_tab()
-            else:
-                _render_placeholder_tab(TABS[index])

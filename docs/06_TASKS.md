@@ -46,5 +46,23 @@ Phase 5E-Market-Minimal：市场环境真实行情最小闭环，状态：已完
 UI-REFINE-1：全局 UI 重构，状态：已完成
 
 DEPLOY-1：GitHub / Streamlit Cloud 部署准备，状态：已完成
-DEPLOY-2：上传 GitHub，状态：未开始
-DEPLOY-3：Streamlit Cloud 部署，状态：未开始
+DEPLOY-2：上传 GitHub，状态：已完成
+DEPLOY-3：Streamlit Cloud 部署，状态：已完成
+DEPLOY-4：Streamlit Cloud 云端验收，状态：进行中
+
+DEPLOY-4 验收项：
+
+* 云端 App 可以打开
+* app.py 位于仓库根目录
+* requirements.txt 位于仓库根目录
+* 云端可以安装 streamlit / pandas / plotly / yfinance
+* 市场环境模块可以访问
+* 市场资金监控页可以展示 QQQ / ^IXIC / BTC-USD
+* 市场情绪监控页可以展示 ^VIX
+* 如果真实行情拉取失败，页面显示“数据不足”
+* 首次真实行情 data_status 默认为“待人工确认”
+* 不输出投资建议
+* 不自动交易
+* 不自动下单
+
+PHASE-6A：市场环境真实行情结论规则化，状态：已完成

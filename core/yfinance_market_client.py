@@ -8,6 +8,7 @@ The first real-data status is 待人工确认. Missing or failed data is reporte
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import UTC, datetime
 
 import pandas as pd
 
@@ -34,6 +35,10 @@ class MovingAverageResult:
     relative_volume: float | None
     above_ma20: bool | None
     above_ma50: bool | None
+
+
+def _utc_now_iso():
+    return datetime.now(UTC).replace(microsecond=0).isoformat()
 
 
 def _round_number(value):
@@ -71,7 +76,7 @@ def _normalize_history(history):
 
 
 def calculate_market_fund_metrics(history):
-    """Calculate market fund metrics from local dataframe data."""
+    """Calculate market fund metrics from dataframe data."""
     normalized = _normalize_history(history)
     if normalized.empty or "Close" not in normalized:
         return MovingAverageResult(None, None, None, None, None, None, None, None, None)
@@ -111,7 +116,7 @@ def calculate_market_fund_metrics(history):
     )
 
 
-def _market_fund_record(symbol, history):
+def _market_fund_record(symbol, history, updated_at=None):
     meta = MARKET_FUND_SYMBOLS[symbol]
     metrics = calculate_market_fund_metrics(history)
     metric_values = (
@@ -146,12 +151,12 @@ def _market_fund_record(symbol, history):
         "source_name": "yfinance",
         "source_type": "external_market_data",
         "data_status": data_status,
-        "updated_at": "",
+        "updated_at": updated_at or _utc_now_iso(),
         "note": "真实行情读取，首次状态需人工确认。" if data_status == DATA_STATUS_PENDING_REVIEW else DATA_STATUS_INSUFFICIENT,
     }
 
 
-def _sentiment_record(history):
+def _sentiment_record(history, updated_at=None):
     normalized = _normalize_history(history)
     current_value = None
     if not normalized.empty and "Close" in normalized:
@@ -169,7 +174,7 @@ def _sentiment_record(history):
         "source_name": "yfinance",
         "source_type": "external_market_sentiment",
         "data_status": data_status,
-        "updated_at": "",
+        "updated_at": updated_at or _utc_now_iso(),
         "note": "真实行情读取，首次状态需人工确认。" if data_status == DATA_STATUS_PENDING_REVIEW else DATA_STATUS_INSUFFICIENT,
     }
 
@@ -187,6 +192,7 @@ def _download_history(yf, symbol):
 
 def fetch_market_environment_data():
     """Fetch minimal real market environment data from yfinance."""
+    fetch_time = _utc_now_iso()
     try:
         import yfinance as yf
     except ImportError:
@@ -205,18 +211,18 @@ def fetch_market_environment_data():
     for symbol in MARKET_FUND_SYMBOLS:
         try:
             history = _download_history(yf, symbol)
-            record = _market_fund_record(symbol, history)
+            record = _market_fund_record(symbol, history, updated_at=fetch_time)
         except Exception as exc:
-            record = _market_fund_record(symbol, pd.DataFrame())
+            record = _market_fund_record(symbol, pd.DataFrame(), updated_at=fetch_time)
             record["note"] = DATA_STATUS_INSUFFICIENT
             errors.append(f"{symbol}: {exc}")
         market_funds.append(record)
 
     try:
         vix_history = _download_history(yf, VIX_SYMBOL)
-        market_sentiment.append(_sentiment_record(vix_history))
+        market_sentiment.append(_sentiment_record(vix_history, updated_at=fetch_time))
     except Exception as exc:
-        market_sentiment.append(_sentiment_record(pd.DataFrame()))
+        market_sentiment.append(_sentiment_record(pd.DataFrame(), updated_at=fetch_time))
         errors.append(f"{VIX_SYMBOL}: {exc}")
 
     ok = bool(market_funds) and bool(market_sentiment) and not all(
