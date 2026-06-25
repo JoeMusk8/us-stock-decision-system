@@ -1,0 +1,21 @@
+{
+  "version": "0.1",
+  "stage": "Phase 5E-2A",
+  "description": "运行时安全开关示例。默认关闭真实数据和外部网络。",
+  "flags": {
+    "allow_external_network": false,
+    "allow_real_market_data": false,
+    "allow_real_data_to_ui": false,
+    "allow_auto_verified_status": false,
+    "allow_trading": false,
+    "allow_order_execution": false,
+    "allow_investment_advice": false
+  },
+  "rules": {
+    "default_safe_mode": true,
+    "manual_review_required": true,
+    "real_data_first_status": "待人工确认",
+    "missing_data_display": "数据不足",
+    "not_trading_signal": true
+  }
+}
