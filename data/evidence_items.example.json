@@ -1,0 +1,121 @@
+{
+  "version": "0.1",
+  "stage": "Phase 3C",
+  "description": "evidence_items 示例结构。当前未接入真实数据。",
+  "rules": {
+    "no_real_data": true,
+    "evidence_id_required_for_facts": true,
+    "social_media_as_clue_only": true,
+    "ai_content_requires_human_review": true
+  },
+  "fields": [
+    {
+      "name": "id",
+      "description": "本地记录 ID。"
+    },
+    {
+      "name": "evidence_id",
+      "description": "证据编号，用于连接事实、Claim、结论和 evidence_items。"
+    },
+    {
+      "name": "source_type",
+      "description": "证据来源类型，例如 official_disclosure、government_contract、social_kol_clue。"
+    },
+    {
+      "name": "source_name",
+      "description": "证据来源名称。示例结构中不得写入真实来源。"
+    },
+    {
+      "name": "title",
+      "description": "证据标题。示例结构中仅使用示例标题。"
+    },
+    {
+      "name": "summary",
+      "description": "证据摘要。AI 摘要必须标记为 AI草稿 / 待人工确认。"
+    },
+    {
+      "name": "url",
+      "description": "证据来源 URL。当前示例结构必须为空字符串。"
+    },
+    {
+      "name": "related_module",
+      "description": "关联模块名称。"
+    },
+    {
+      "name": "related_ticker",
+      "description": "关联股票占位。示例结构只允许使用 股票1 或空字符串。"
+    },
+    {
+      "name": "related_theme",
+      "description": "关联主题占位。"
+    },
+    {
+      "name": "evidence_level",
+      "description": "证据等级，可为 A / B / C / D。"
+    },
+    {
+      "name": "data_status",
+      "description": "数据状态，可为 待配置、示例数据、数据不足、已验证、待人工确认。"
+    },
+    {
+      "name": "clue_only",
+      "description": "是否仅作为线索。社交媒体 / KOL 数据必须为 true。"
+    },
+    {
+      "name": "human_review_required",
+      "description": "是否需要人工确认。当前示例记录必须为 true。"
+    },
+    {
+      "name": "fact_allowed",
+      "description": "是否允许进入事实区。线索数据必须为 false。"
+    },
+    {
+      "name": "created_at",
+      "description": "创建时间。示例结构不填写真实时间。"
+    },
+    {
+      "name": "updated_at",
+      "description": "更新时间。示例结构不填写真实时间。"
+    }
+  ],
+  "records": [
+    {
+      "id": "example_1",
+      "evidence_id": "EVID-EXAMPLE-001",
+      "source_type": "official_disclosure",
+      "source_name": "示例来源",
+      "title": "示例证据1",
+      "summary": "示例摘要。AI草稿 / 待人工确认。当前未接入真实数据。",
+      "url": "",
+      "related_module": "深度投研模块",
+      "related_ticker": "股票1",
+      "related_theme": "示例主题",
+      "evidence_level": "B",
+      "data_status": "示例数据",
+      "clue_only": false,
+      "human_review_required": true,
+      "fact_allowed": true,
+      "created_at": "",
+      "updated_at": ""
+    },
+    {
+      "id": "example_2",
+      "evidence_id": "EVID-EXAMPLE-002",
+      "source_type": "social_kol_clue",
+      "source_name": "示例线索来源",
+      "title": "示例证据2",
+      "summary": "示例线索摘要。AI草稿 / 待人工确认。只能作为线索，不能直接作为事实结论。",
+      "url": "",
+      "related_module": "范式创新监控模块",
+      "related_ticker": "",
+      "related_theme": "示例主题",
+      "evidence_level": "D",
+      "data_status": "示例数据",
+      "clue_only": true,
+      "human_review_required": true,
+      "fact_allowed": false,
+      "created_at": "",
+      "updated_at": ""
+    }
+  ]
+}

@@ -1,0 +1,92 @@
+{
+  "version": "0.1",
+  "stage": "Phase 4C",
+  "description": "市场环境 mock 示例数据。当前不是真实行情数据。",
+  "rules": {
+    "no_real_data": true,
+    "no_api_connected": true,
+    "mock_only": true,
+    "not_trading_signal": true
+  },
+  "market_funds": [
+    {
+      "symbol": "QQQ",
+      "asset_name": "QQQ",
+      "asset_type": "ETF",
+      "current_price": null,
+      "ma_20": null,
+      "ma_50": null,
+      "ma_20_direction": "数据不足",
+      "ma_50_direction": "数据不足",
+      "volume": null,
+      "relative_volume": null,
+      "above_ma20": null,
+      "above_ma50": null,
+      "stronger_than_benchmark": null,
+      "risk_appetite_spread": null,
+      "source_name": "mock_local_file",
+      "source_type": "mock_market_fund",
+      "data_status": "示例数据",
+      "updated_at": "",
+      "note": "这是 mock 示例，不是真实行情数据。"
+    },
+    {
+      "symbol": "NASDAQ_INDEX",
+      "asset_name": "纳斯达克指数",
+      "asset_type": "指数",
+      "current_price": null,
+      "ma_20": null,
+      "ma_50": null,
+      "ma_20_direction": "数据不足",
+      "ma_50_direction": "数据不足",
+      "volume": null,
+      "relative_volume": null,
+      "above_ma20": null,
+      "above_ma50": null,
+      "stronger_than_benchmark": null,
+      "risk_appetite_spread": null,
+      "source_name": "mock_local_file",
+      "source_type": "mock_market_fund",
+      "data_status": "示例数据",
+      "updated_at": "",
+      "note": "这是 mock 示例，不是真实行情数据。"
+    },
+    {
+      "symbol": "BITCOIN",
+      "asset_name": "比特币",
+      "asset_type": "加密资产",
+      "current_price": null,
+      "ma_20": null,
+      "ma_50": null,
+      "ma_20_direction": "数据不足",
+      "ma_50_direction": "数据不足",
+      "volume": null,
+      "relative_volume": null,
+      "above_ma20": null,
+      "above_ma50": null,
+      "stronger_than_benchmark": null,
+      "risk_appetite_spread": null,
+      "source_name": "mock_local_file",
+      "source_type": "mock_market_fund",
+      "data_status": "示例数据",
+      "updated_at": "",
+      "note": "这是 mock 示例，不是真实行情数据。"
+    }
+  ],
+  "market_sentiment": [
+    {
+      "indicator_id": "VIX",
+      "indicator_name": "VIX",
+      "indicator_type": "market_sentiment",
+      "current_value": null,
+      "current_status": "数据不足",
+      "risk_meaning": "数据不足",
+      "direction": "数据不足",
+      "source_name": "mock_local_file",
+      "source_type": "mock_market_sentiment",
+      "data_status": "示例数据",
+      "updated_at": "",
+      "note": "这是 mock 示例，不是真实市场情绪数据。"
+    }
+  ]
+}
