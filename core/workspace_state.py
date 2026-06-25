@@ -14,6 +14,7 @@ WORKSPACE_KEYS = (
     "candidate_stocks",
     "deep_research_tasks",
     "tracking_pool",
+    "sec_company_snapshots",
 )
 
 
@@ -23,8 +24,8 @@ def _session_get(session_data: Mapping[str, Any] | Any, key: str, default: Any):
     return default
 
 
-def _list_or_empty(value: Any) -> list:
-    if isinstance(value, list):
+def _copy_workspace_value(value: Any):
+    if isinstance(value, (list, dict)):
         return deepcopy(value)
     return []
 
@@ -35,7 +36,8 @@ def build_workspace_snapshot(session_data: Mapping[str, Any] | Any) -> dict:
         "exported_at": datetime.now(UTC).isoformat(),
     }
     for key in WORKSPACE_KEYS:
-        snapshot[key] = _list_or_empty(_session_get(session_data, key, []))
+        default = {} if key == "sec_company_snapshots" else []
+        snapshot[key] = _copy_workspace_value(_session_get(session_data, key, default))
     return snapshot
 
 
@@ -48,7 +50,9 @@ def validate_workspace_snapshot(snapshot: Any) -> dict:
     for key in WORKSPACE_KEYS:
         if key not in snapshot:
             errors.append(f"missing field: {key}")
-        elif not isinstance(snapshot.get(key), list):
+        elif key == "sec_company_snapshots" and not isinstance(snapshot.get(key), dict):
+            errors.append(f"invalid field type: {key}")
+        elif key != "sec_company_snapshots" and not isinstance(snapshot.get(key), list):
             errors.append(f"invalid field type: {key}")
     return {"ok": not errors, "errors": errors}
 
@@ -57,7 +61,7 @@ def restore_workspace_snapshot(snapshot: dict) -> dict:
     validation = validate_workspace_snapshot(snapshot)
     if not validation["ok"]:
         return {}
-    return {key: _list_or_empty(snapshot.get(key, [])) for key in WORKSPACE_KEYS}
+    return {key: _copy_workspace_value(snapshot.get(key, {} if key == "sec_company_snapshots" else [])) for key in WORKSPACE_KEYS}
 
 
 def to_json_bytes(snapshot: dict) -> bytes:
