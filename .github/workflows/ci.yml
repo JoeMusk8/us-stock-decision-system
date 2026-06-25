@@ -30,6 +30,7 @@ jobs:
           python tests/test_workspace_state.py
           python tests/test_workflow_overview.py
           python tests/test_workspace_quality.py
+          python tests/test_sec_edgar_client.py
           python tests/test_paradigm_monitor_model.py
           python tests/test_paradigm_to_basic_bridge.py
           python tests/test_basic_research_model.py
